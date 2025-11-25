@@ -310,7 +310,7 @@ class Visualizer:
 # ======================
 # MAIN
 # ======================
-def main():
+def main(cap):
     print("=== MULTI-PERSON MASK DETECTOR (modular, DRY, SRP) ===")
     print("Модульный дизайн | Трекинг | Точно как в трейне")
     print("Press ESC to exit\n")
@@ -325,58 +325,41 @@ def main():
     tracker = FaceTracker(config.TRACK_MAX_AGE, config.TRACK_IOU_THRESHOLD)
     visualizer = Visualizer(config)
     
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Камера недоступна")
-        return
-    
     print("Запуск детекции...")
-    
-    try:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+    def detect(frame):
 
-            # Детекция
-            bboxes = detector.detect(frame)
-            
-            # Классификация
-            detections = []
-            for bbox in bboxes:
-                x, y, w, h = bbox
-                face_roi = frame[y:y+h, x:x+w]
-                if face_roi.size == 0:
-                    continue
-                try:
-                    features = feature_extractor.extract(face_roi)
-                    pred, conf = classifier.predict(features)
-                    detections.append((bbox, pred, conf))
-                except Exception as e:
-                    print(f"ML error: {e}")
-                    detections.append((bbox, -1, 0.0))
-            
-            # Трекинг
-            tracks = tracker.update(detections)
-            
-            # Визуализация
-            for tid, track in tracks.items():
-                age = tracker.frame_counter - track['last_frame']
-                visualizer.draw_face(
-                    frame, track['bbox'], track['pred'], track['conf'],
-                    tid, age
-                )
-            visualizer.draw_stats(frame, len(tracks), len(detections))
-            
-            cv2.imshow('Mask Detector (modular)', frame)
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-                
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
-        detector.release()
-        print("\nДетекция завершена")
+        # Детекция
+        bboxes = detector.detect(frame)
+
+        # Классификация
+        detections = []
+        for bbox in bboxes:
+            x, y, w, h = bbox
+            face_roi = frame[y:y + h, x:x + w]
+            if face_roi.size == 0:
+                continue
+            try:
+                features = feature_extractor.extract(face_roi)
+                pred, conf = classifier.predict(features)
+                detections.append((bbox, pred, conf))
+            except Exception as e:
+                print(f"ML error: {e}")
+                detections.append((bbox, -1, 0.0))
+
+        # Трекинг
+        tracks = tracker.update(detections)
+
+        # Визуализация
+        for tid, track in tracks.items():
+            age = tracker.frame_counter - track['last_frame']
+            visualizer.draw_face(
+                frame, track['bbox'], track['pred'], track['conf'],
+                tid, age
+            )
+        visualizer.draw_stats(frame, len(tracks), len(detections))
+
+        return frame
+    return detect
 
 
 if __name__ == "__main__":
