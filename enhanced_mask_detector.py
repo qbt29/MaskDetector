@@ -342,6 +342,7 @@ def main(cap):
                 features = feature_extractor.extract(face_roi)
                 pred, conf = classifier.predict(features)
                 detections.append((bbox, pred, conf))
+                print(bbox, pred)
             except Exception as e:
                 print(f"ML error: {e}")
                 detections.append((bbox, -1, 0.0))

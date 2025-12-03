@@ -4,6 +4,7 @@ from fastapi import Request
 from api import router
 import uvicorn
 # import camera
+
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 # cam = camera.Camera()
@@ -20,4 +21,4 @@ async def next_page():
 #     return StreamingResponse(cam.process_video(), media_type="multipart/x-mixed-replace;boundary=frame")
 
 app.include_router(router)
-#uvicorn.run(app, host="127.0.0.1", port=8000)
+uvicorn.run(app, host="0.0.0.0", port=8000)
