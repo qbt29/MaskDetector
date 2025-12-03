@@ -1,366 +1,366 @@
-
 import cv2
 import numpy as np
-import joblib
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import os
-import sys
-import warnings
-from typing import List, Tuple, Optional, Dict, Any
-
-from sklearn.exceptions import InconsistentVersionWarning
-warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
-
-sys.path.append(os.path.dirname(__file__))
-
+import time  
 import mediapipe as mp
+
 mp_face_mesh = mp.solutions.face_mesh
 
 
-# ======================
-# CONFIG
-# ======================
-class Config:
-    # Model
-    MODEL_PATHS = [
-        'mask_classifier_super_improved.pkl',
-        'mask_classifier_fixed.pkl',
-        'mask_classifier_augmented.pkl',
-    ]
-    
-    # Feature extraction (должно совпадать с трейном)
-    INPUT_SIZE = (100, 100)
-    HIST_BINS = 12
-    HSV_H_BINS = 10
-    HSV_S_BINS = 10
-    
-    # FaceMesh
-    MAX_NUM_FACES = 10
-    MIN_DETECTION_CONF = 0.5
-    MIN_TRACKING_CONF = 0.5
-    BBOX_PADDING_RATIO = 0.1
-    
-    # Tracking
-    TRACK_MAX_AGE = 15
-    TRACK_IOU_THRESHOLD = 0.25
-    
-    # Drawing
-    LABELS = ['Mask OK', 'No Mask', 'Wrong Mask']
-    COLORS = [(0, 255, 0), (0, 0, 255), (0, 165, 255)]
-    ERROR_COLOR = (255, 255, 0)
+class MaskClassifier(nn.Module):
+    def __init__(self, input_dim, num_classes=3):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.fc2 = nn.Linear(512, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.fc3 = nn.Linear(256, 128)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.fc4 = nn.Linear(128, 64)
+        self.bn4 = nn.BatchNorm1d(64)
+        self.fc5 = nn.Linear(64, 32)
+        self.bn5 = nn.BatchNorm1d(32)
+        self.output = nn.Linear(32, num_classes)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        if x.size(0) > 1 or not self.training:
+            x = self.bn1(x)
+        x = F.leaky_relu(x, negative_slope=0.01)
+
+        x = self.fc2(x)
+        if x.size(0) > 1 or not self.training:
+            x = self.bn2(x)
+        x = F.leaky_relu(x, negative_slope=0.01)
+
+        x = self.fc3(x)
+        if x.size(0) > 1 or not self.training:
+            x = self.bn3(x)
+        x = F.leaky_relu(x, negative_slope=0.01)
+
+        x = self.fc4(x)
+        if x.size(0) > 1 or not self.training:
+            x = self.bn4(x)
+        x = F.leaky_relu(x, negative_slope=0.01)
+
+        x = self.fc5(x)
+        if x.size(0) > 1 or not self.training:
+            x = self.bn5(x)
+        x = F.leaky_relu(x, negative_slope=0.01)
+
+        x = self.output(x)
+        return x
 
 
-# ======================
-# FEATURE EXTRACTOR — строго как в трейне
-# ======================
 class FeatureExtractor:
-    """Извлекает признаки точно так же, как при обучении."""
-    
-    def __init__(self, config: Config):
-        self.config = config
+    def __init__(self):
+        self.input_size = (100, 100)
 
-    def split_into_thirds(self, img: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        h = img.shape[0]
-        return (
-            img[:h//3, :],
-            img[h//3:2*h//3, :],
-            img[2*h//3:, :]
-        )
+    def extract(self, face_roi):
+        if face_roi.size == 0:
+            return np.zeros((1, 119))
 
-    def compute_hist(self, region: np.ndarray, channels: List[int], bins: List[int]) -> np.ndarray:
+        try:
+            face = cv2.resize(face_roi, self.input_size)
+            h, w = face.shape[:2]
+
+            top = face[:h // 3, :]
+            middle = face[h // 3:2 * h // 3, :]
+            bottom = face[2 * h // 3:, :]
+
+            hist_top = self._calc_hist(top, 12)
+            hist_bottom = self._calc_hist(bottom, 12)
+
+            hsv_top = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
+            hist_h = cv2.calcHist([hsv_top], [0], None, [10], [0, 180])
+            hist_s = cv2.calcHist([hsv_top], [1], None, [10], [0, 256])
+            hist_h = cv2.normalize(hist_h, hist_h).flatten()
+            hist_s = cv2.normalize(hist_s, hist_s).flatten()
+
+            avg_top = np.mean(top, axis=(0, 1))
+            avg_middle = np.mean(middle, axis=(0, 1))
+            avg_bottom = np.mean(bottom, axis=(0, 1))
+
+            lab = cv2.cvtColor(face, cv2.COLOR_BGR2LAB)
+            avg_lab = np.mean(lab, axis=(0, 1))
+
+            diff_tb = np.abs(avg_top - avg_bottom)
+            diff_tm = np.abs(avg_top - avg_middle)
+            diff_mb = np.abs(avg_middle - avg_bottom)
+
+            gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+            lap_var = np.var(cv2.Laplacian(gray, cv2.CV_64F))
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            sobel_var = np.var(sobelx) + np.var(sobely)
+
+            brightness_top = np.mean(gray[:h // 3, :])
+            brightness_bottom = np.mean(gray[2 * h // 3:, :])
+            brightness_diff = abs(brightness_top - brightness_bottom)
+
+            gray_std = np.std(gray)
+            gray_mean = np.mean(gray)
+            gray_skew = np.mean((gray - gray_mean) ** 3) / (gray_std ** 3) if gray_std > 0 else 0
+
+            aspect_ratio = h / w if w > 0 else 1.0
+
+            features = np.hstack([
+                hist_top, hist_bottom,
+                hist_h, hist_s,
+                avg_top, avg_middle, avg_bottom,
+                avg_lab,
+                diff_tb, diff_tm, diff_mb,
+                [lap_var, sobel_var, brightness_diff, aspect_ratio,
+                 gray_std, gray_skew]  
+            ])
+
+            if len(features) != 119:
+                print(f" Исправлена размерность: {len(features)} → 119")
+                if len(features) < 119:
+                    features = np.pad(features, (0, 119 - len(features)), 'constant')
+                else:
+                    features = features[:119]
+
+            return features.reshape(1, -1)
+
+        except Exception as e:
+            return np.zeros((1, 119))
+
+    def _calc_hist(self, img, bins):
         hist = []
-        for ch, b in zip(channels, bins):
-            hch = cv2.calcHist([region], [ch], None, [b], [0, 256])
-            hch = cv2.normalize(hch, hch).flatten()
-            hist.append(hch)
+        for ch in range(3):
+            h = cv2.calcHist([img], [ch], None, [bins], [0, 256])
+            h = cv2.normalize(h, h).flatten()
+            hist.append(h)
         return np.hstack(hist)
 
-    def extract(self, face_roi: np.ndarray) -> np.ndarray:
-        """Возвращает (1, n_features) вектор признаков."""
-        face_resized = cv2.resize(face_roi, self.config.INPUT_SIZE)
-        top, middle, bottom = self.split_into_thirds(face_resized)
-        
-        # Гистограммы BGR
-        hist_top = self.compute_hist(top, [0, 1, 2], [self.config.HIST_BINS] * 3)
-        hist_bottom = self.compute_hist(bottom, [0, 1, 2], [self.config.HIST_BINS] * 3)
-        
-        # HSV для верхней трети
-        hsv_top = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
-        hist_h = cv2.calcHist([hsv_top], [0], None, [self.config.HSV_H_BINS], [0, 180])
-        hist_s = cv2.calcHist([hsv_top], [1], None, [self.config.HSV_S_BINS], [0, 256])
-        hist_h = cv2.normalize(hist_h, hist_h).flatten()
-        hist_s = cv2.normalize(hist_s, hist_s).flatten()
-        
-        # Средние цвета
-        avg_top = np.mean(top, axis=(0, 1))
-        avg_middle = np.mean(middle, axis=(0, 1))
-        avg_bottom = np.mean(bottom, axis=(0, 1))
-        
-        # Разницы
-        diff_tb = np.abs(avg_top - avg_bottom)
-        diff_tm = np.abs(avg_top - avg_middle)
-        diff_mb = np.abs(avg_middle - avg_bottom)
-        
-        # Текстура и яркость
-        gray = cv2.cvtColor(face_resized, cv2.COLOR_BGR2GRAY)
-        lap_var = np.var(cv2.Laplacian(gray, cv2.CV_64F))
-        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        sobel_var = np.var(sobelx) + np.var(sobely)
-        
-        brightness_top = np.mean(gray[:gray.shape[0]//3, :])
-        brightness_bottom = np.mean(gray[2*gray.shape[0]//3:, :])
-        brightness_contrast = abs(brightness_top - brightness_bottom)
-        
-        # Сборка признаков
-        features = np.hstack([
-            hist_top, hist_bottom,
-            hist_h, hist_s,
-            avg_top, avg_middle, avg_bottom,
-            diff_tb, diff_tm, diff_mb,
-            [lap_var, sobel_var, brightness_contrast]
-        ])
-        return features.reshape(1, -1)
 
-
-# ======================
-# CLASSIFIER WRAPPER
-# ======================
-class MaskClassifier:
-    """Обёртка над ML-моделью."""
-    
-    def __init__(self, model_path: str):
-        self.model = joblib.load(model_path)
-        self.model_path = model_path
-
-    def predict(self, features: np.ndarray) -> Tuple[int, float]:
-        probas = self.model.predict_proba(features)[0]
-        pred = int(np.argmax(probas))
-        conf = float(probas[pred])
-        return pred, conf
-
-
-# ======================
-# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ЗАГРУЗКИ МОДЕЛИ
-# ======================
-def load_mask_classifier() -> Optional[MaskClassifier]:
-    """Загружает первую доступную модель классификатора масок."""
-    for path in Config.MODEL_PATHS:
-        if os.path.exists(path):
-            try:
-                clf = MaskClassifier(path)
-                print(f"ML-модель загружена: '{path}'")
-                return clf
-            except Exception as e:
-                print(f"Ошибка загрузки '{path}': {e}")
-    print("ML-модель не найдена.")
-    return None
-
-
-# ======================
-# TRACKER (TTL + IoU)
-# ======================
-class FaceTracker:
-    """Простой трекер на основе кэша, TTL и IoU."""
-    
-    def __init__(self, max_age: int, iou_threshold: float):
-        self.max_age = max_age
-        self.iou_threshold = iou_threshold
-        self.tracks = {}
-        self.next_id = 0
-        self.frame_counter = 0
-
-    def iou(self, boxA: Tuple[int, int, int, int], boxB: Tuple[int, int, int, int]) -> float:
-        x1a, y1a, w1a, h1a = boxA
-        x1b, y1b, w1b, h1b = boxB
-        
-        xi1 = max(x1a, x1b)
-        yi1 = max(y1a, y1b)
-        xi2 = min(x1a + w1a, x1b + w1b)
-        yi2 = min(y1a + h1a, y1b + h1b)
-        
-        inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-        areaA = w1a * h1a
-        areaB = w1b * h1b
-        union = areaA + areaB - inter
-        
-        return inter / union if union > 0 else 0.0
-
-    def update(self, detections: List[Tuple[Tuple[int, int, int, int], int, float]]) -> Dict[int, Dict]:
-        self.frame_counter += 1
-        
-        # Удаление устаревших треков
-        self.tracks = {
-            tid: t for tid, t in self.tracks.items()
-            if self.frame_counter - t['last_frame'] <= self.max_age
-        }
-        
-        matched = [False] * len(detections)
-        
-        # Сопоставление существующих треков с новыми детекциями
-        for tid, track in list(self.tracks.items()):
-            best_iou = 0.0
-            best_idx = -1
-            for i, (bbox, _, _) in enumerate(detections):
-                if matched[i]:
-                    continue
-                iou_val = self.iou(track['bbox'], bbox)
-                if iou_val > best_iou and iou_val >= self.iou_threshold:
-                    best_iou = iou_val
-                    best_idx = i
-            if best_idx != -1:
-                bbox, pred, conf = detections[best_idx]
-                self.tracks[tid].update({
-                    'bbox': bbox,
-                    'pred': pred,
-                    'conf': conf,
-                    'last_frame': self.frame_counter
-                })
-                matched[best_idx] = True
-        
-        # Добавление новых треков
-        for i, (bbox, pred, conf) in enumerate(detections):
-            if not matched[i]:
-                self.tracks[self.next_id] = {
-                    'bbox': bbox,
-                    'pred': pred,
-                    'conf': conf,
-                    'last_frame': self.frame_counter
-                }
-                self.next_id += 1
-        
-        return self.tracks
-
-
-# ======================
-# DETECTOR (MediaPipe)
-# ======================
 class FaceDetector:
-    """Инкапсуляция MediaPipe FaceMesh."""
-    
-    def __init__(self, config: Config):
-        self.config = config
+    def __init__(self):
         self.face_mesh = mp_face_mesh.FaceMesh(
-            max_num_faces=self.config.MAX_NUM_FACES,
-            refine_landmarks=True,
-            min_detection_confidence=self.config.MIN_DETECTION_CONF,
-            min_tracking_confidence=self.config.MIN_TRACKING_CONF
+            static_image_mode=False,
+            max_num_faces=5,
+            refine_landmarks=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
         )
 
-    def detect(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
+    def detect(self, frame):
+        """Возвращает список (x, y, w, h) — ТОЧНО КАК В CLI"""
+        h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_mesh.process(rgb)
-        
-        bboxes = []
+        faces = []
         if results.multi_face_landmarks:
-            h, w = frame.shape[:2]
-            for flm in results.multi_face_landmarks:
-                xs = [lm.x * w for lm in flm.landmark]
-                ys = [lm.y * h for lm in flm.landmark]
+            for face_landmarks in results.multi_face_landmarks:
+                xs = [lm.x * w for lm in face_landmarks.landmark]
+                ys = [lm.y * h for lm in face_landmarks.landmark]
                 x1, y1 = int(min(xs)), int(min(ys))
                 x2, y2 = int(max(xs)), int(max(ys))
-                
-                pad_w = int(self.config.BBOX_PADDING_RATIO * (x2 - x1))
-                pad_h = int(self.config.BBOX_PADDING_RATIO * (y2 - y1))
-                x1 = max(0, x1 - pad_w)
-                y1 = max(0, y1 - pad_h)
-                x2 = min(w, x2 + pad_w)
-                y2 = min(h, y2 + pad_h)
-                
-                bboxes.append((x1, y1, x2 - x1, y2 - y1))
-        return bboxes
+                padding = int((x2 - x1) * 0.15)
+                x1 = max(0, x1 - padding)
+                y1 = max(0, y1 - padding)
+                x2 = min(w, x2 + padding)
+                y2 = min(h, y2 + padding)
+                faces.append((x1, y1, x2 - x1, y2 - y1)) 
+        return faces
 
-    def release(self):
+    def __del__(self):
         self.face_mesh.close()
 
 
-# ======================
-# DRAWING UTILS
-# ======================
-class Visualizer:
-    """Отрисовка аннотаций и статистики."""
-    
-    def __init__(self, config: Config):
-        self.config = config
+class BBoxSmoother:
+    """Полностью сохранён из CLI — сглаживание идентично"""
+    def __init__(self, alpha=0.8, max_age=10, min_iou=0.3):
+        self.alpha = alpha
+        self.max_age = max_age
+        self.min_iou = min_iou
+        self.tracks = {}
+        self.next_id = 0
+        self.colors = [(0, 255, 0), (0, 0, 255), (0, 165, 255)]
+        self.labels = ['Mask OK', 'No Mask', 'Wrong Mask']
 
-    def draw_face(self, frame: np.ndarray, bbox: Tuple[int, int, int, int],
-                  pred: int, conf: float, track_id: int, age: int):
-        x, y, w, h = bbox
-        
-        if pred == -1:
-            color = self.config.ERROR_COLOR
-            label = "Error"
-        else:
-            color = self.config.COLORS[pred]
-            label = f"{self.config.LABELS[pred]} ({conf:.2f})"
-        
-        cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-        txt_color = (255, 255, 255) if np.mean(color) < 128 else (0, 0, 0)
-        cv2.putText(frame, label, (x, y - 10),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, txt_color, 2)
-        cv2.putText(frame, f"ID:{track_id} ({age})", (x, y + h + 15),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    def _calculate_iou(self, box1, box2):
+        x1, y1, w1, h1 = box1
+        x2, y2, w2, h2 = box2
+        box1_x2, box1_y2 = x1 + w1, y1 + h1
+        box2_x2, box2_y2 = x2 + w2, y2 + h2
+        x_left = max(x1, x2)
+        y_top = max(y1, y2)
+        x_right = min(box1_x2, box2_x2)
+        y_bottom = min(box1_y2, box2_y2)
+        if x_right < x_left or y_bottom < y_top:
+            return 0.0
+        inter = (x_right - x_left) * (y_bottom - y_top)
+        union = w1 * h1 + w2 * h2 - inter
+        return inter / union if union > 0 else 0
 
-    def draw_stats(self, frame: np.ndarray, tracked: int, detected: int):
-        cv2.putText(frame, f"Tracked: {tracked}", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(frame, f"Detected now: {detected}", (10, 55),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    def update(self, detections, predictions, confidences):
+        for track_id in list(self.tracks.keys()):
+            self.tracks[track_id]['age'] += 1
+            if self.tracks[track_id]['age'] > self.max_age:
+                del self.tracks[track_id]
 
+        matched_tracks = set()
+        matched_detections = set()
 
-# ======================
-# MAIN
-# ======================
-def main(cap):
-    print("=== MULTI-PERSON MASK DETECTOR (modular, DRY, SRP) ===")
-    print("Модульный дизайн | Трекинг | Точно как в трейне")
-    print("Press ESC to exit\n")
-
-    classifier = load_mask_classifier()
-    if classifier is None:
-        return
-
-    config = Config()
-    feature_extractor = FeatureExtractor(config)
-    detector = FaceDetector(config)
-    tracker = FaceTracker(config.TRACK_MAX_AGE, config.TRACK_IOU_THRESHOLD)
-    visualizer = Visualizer(config)
-    
-    print("Запуск детекции...")
-    def detect(frame):
-
-        # Детекция
-        bboxes = detector.detect(frame)
-
-        # Классификация
-        detections = []
-        for bbox in bboxes:
-            x, y, w, h = bbox
-            face_roi = frame[y:y + h, x:x + w]
-            if face_roi.size == 0:
+        for track_id, track in self.tracks.items():
+            if track_id in matched_tracks:
                 continue
-            try:
-                features = feature_extractor.extract(face_roi)
-                pred, conf = classifier.predict(features)
-                detections.append((bbox, pred, conf))
-            except Exception as e:
-                print(f"ML error: {e}")
-                detections.append((bbox, -1, 0.0))
 
-        # Трекинг
-        tracks = tracker.update(detections)
+            best_iou = 0
+            best_det_idx = -1
 
-        # Визуализация
-        for tid, track in tracks.items():
-            age = tracker.frame_counter - track['last_frame']
-            visualizer.draw_face(
-                frame, track['bbox'], track['pred'], track['conf'],
-                tid, age
-            )
-        visualizer.draw_stats(frame, len(tracks), len(detections))
+            for det_idx, det_box in enumerate(detections):
+                if det_idx in matched_detections:
+                    continue
+                iou = self._calculate_iou(track['bbox'], det_box)
+                if iou > best_iou and iou > self.min_iou:
+                    best_iou = iou
+                    best_det_idx = det_idx
+
+            if best_det_idx != -1:
+                det_box = detections[best_det_idx]
+                smoothed_box = (
+                    int(self.alpha * track['bbox'][0] + (1 - self.alpha) * det_box[0]),
+                    int(self.alpha * track['bbox'][1] + (1 - self.alpha) * det_box[1]),
+                    int(self.alpha * track['bbox'][2] + (1 - self.alpha) * det_box[2]),
+                    int(self.alpha * track['bbox'][3] + (1 - self.alpha) * det_box[3])
+                )
+                self.tracks[track_id]['bbox'] = smoothed_box
+                self.tracks[track_id]['pred'] = predictions[best_det_idx]
+                self.tracks[track_id]['conf'] = confidences[best_det_idx]
+                self.tracks[track_id]['age'] = 0
+                color_idx = predictions[best_det_idx]
+                self.tracks[track_id]['color'] = self.colors[color_idx] if color_idx < len(self.colors) else (255, 255, 0)
+                matched_tracks.add(track_id)
+                matched_detections.add(best_det_idx)
+
+        for det_idx, det_box in enumerate(detections):
+            if det_idx in matched_detections:
+                continue
+            track_id = self.next_id
+            self.next_id += 1
+            self.tracks[track_id] = {
+                'bbox': det_box,
+                'pred': predictions[det_idx],
+                'conf': confidences[det_idx],
+                'age': 0,
+                'color': self.colors[predictions[det_idx]] if predictions[det_idx] < len(self.colors) else (255, 255, 0)
+            }
+
+        result = []
+        for track_id, track in self.tracks.items():
+            if track['age'] == 0:
+                result.append({
+                    'bbox': track['bbox'],
+                    'pred': track['pred'],
+                    'conf': track['conf'],
+                    'color': track['color']
+                })
+        return result
+
+
+class MaskDetector:
+    def __init__(self, alpha=0.92):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model = self._load_model()
+        self.face_detector = FaceDetector()
+        self.feature_extractor = FeatureExtractor()
+        self.bbox_smoother = BBoxSmoother(alpha=alpha, max_age=15, min_iou=0.2)
+        self.labels = ['Mask OK', 'No Mask', 'Wrong Mask']
+        self.fps = 0
+        self.prev_time = None
+
+    def _load_model(self):
+        model_files = [
+            'mask_classifier_final_complete.pth',
+            'mask_classifier.pth',
+            'mask_classifier_three_datasets_best.pth'
+        ]
+        model_path = None
+        for f in model_files:
+            if os.path.exists(f):
+                model_path = f
+                break
+        if not model_path:
+            available = [f for f in os.listdir('.') if f.endswith('.pth')]
+            raise FileNotFoundError(f"Модель не найдена. Имеются: {available}")
+        
+        print(f" Загрузка модели: {model_path}")
+        checkpoint = torch.load(model_path, map_location=self.device)
+        input_dim = checkpoint.get('input_dim', 119)
+        model = MaskClassifier(input_dim=input_dim, num_classes=3)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.to(self.device)
+        model.eval()
+        return model
+
+    def detect(self, frame):
+        if frame is None or frame.size == 0:
+            return frame
+
+        raw_faces = self.face_detector.detect(frame)  
+        detections, predictions, confidences = [], [], []
+
+        for (x, y, w, h) in raw_faces:
+            if w < 30 or h < 30:
+                continue
+
+            face_roi = frame[y:y+h, x:x+w]
+
+            features = self.feature_extractor.extract(face_roi)
+
+            expected_dim = self.model.fc1.in_features
+            if features.shape[1] != expected_dim:
+                if features.shape[1] < expected_dim:
+                    features = np.pad(features, ((0, 0), (0, expected_dim - features.shape[1])), 'constant')
+                else:
+                    features = features[:, :expected_dim]
+
+            with torch.no_grad():
+                inp = torch.FloatTensor(features).to(self.device)
+                out = self.model(inp)
+                probs = F.softmax(out, dim=1)
+                pred = torch.argmax(probs, dim=1).item()
+                conf = probs[0][pred].item()
+
+            detections.append((x, y, w, h))
+            predictions.append(pred)
+            confidences.append(conf)
+
+        smoothed_tracks = self.bbox_smoother.update(detections, predictions, confidences)
+
+        for track in smoothed_tracks:
+            x, y, w, h = track['bbox']
+            pred = track['pred']
+            conf = track['conf']
+            color = track['color']
+            label = f"{self.labels[pred] if pred < len(self.labels) else 'Unknown'} ({conf:.2f})"
+            cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+            (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame, (x, y - text_h - 8), (x + text_w, y), color, -1)
+            cv2.putText(frame, label, (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        curr_time = time.time()
+        if self.prev_time:
+            dt = curr_time - self.prev_time
+            if dt > 0:
+                self.fps = 0.9 * self.fps + 0.1 * (1 / dt)
+        self.prev_time = curr_time
+
+        fps_color = (0, 255, 0) if self.fps > 15 else (0, 165, 255) if self.fps > 5 else (0, 0, 255)
+        cv2.putText(frame, f"FPS: {self.fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, fps_color, 2)
+        cv2.putText(frame, f"Faces: {len(smoothed_tracks)}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         return frame
-    return detect
 
+    def __call__(self, frame):
+        return self.detect(frame.copy())
 
-if __name__ == "__main__":
-    main()
+    def reset_tracks(self):
+        self.bbox_smoother.tracks.clear()
+        self.bbox_smoother.next_id = 0

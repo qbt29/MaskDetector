@@ -1,69 +1,107 @@
 import cv2
 import base64
-import enhanced_mask_detector as emd
+import time
+from enhanced_mask_detector import MaskDetector
+
 
 class Camera:
-    def __init__(self):
-        self.cap = self.get_working_camera()
-        self.detector = emd.main(self.cap)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    def __init__(self, camera_index=None):
+        self.current_index = camera_index
+        self.cap = self._open_camera(self.current_index)
+        if self.cap is None:
+            raise RuntimeError(" Не удалось открыть камеру ни одним backend'ом")
+        
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.detector = MaskDetector(alpha=0.8)
         self.last_frame = None
-    
+
     @staticmethod
-    def get_working_camera(a = 0, b=1000):
-        for i in range(a, b):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                print("Working camera offset:",i)
-                return cap
+    def list_cameras(max_id=3):
+        available = []
+        backends = [
+            (cv2.CAP_DSHOW, "DSHOW"),
+            (cv2.CAP_MSMF, "MSMF"),
+        ]
+        for i in range(max_id):
+            for backend, name in backends:
+                cap = cv2.VideoCapture(i, backend)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        available.append((i, w, h, name))
+                        cap.release()
+                        break
+                    cap.release()
+        return available
+
+    def _open_camera(self, camera_index=None):
+        backends = [
+            (cv2.CAP_DSHOW, "DSHOW"),
+            (cv2.CAP_MSMF, "MSMF"),
+            (cv2.CAP_ANY, "ANY"),
+        ]
+        indices = [camera_index] if camera_index is not None else [0, 1, 2]
+        
+        for i in indices:
+            for backend, name in backends:
+                cap = cv2.VideoCapture(i, backend)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        print(f" Камера {i} открыта (backend: {name})")
+                        self.current_index = i
+                        return cap
+                    cap.release()
         return None
 
-    def __del__(self):
-        print("releasing camera")
-        self.cap.release()
+    def switch_camera(self, new_index):
+        if self.cap:
+            self.cap.release()
+        self.cap = self._open_camera(new_index)
+        return self.cap is not None
+
+    def close(self):
+        if hasattr(self, 'cap') and self.cap:
+            self.cap.release()
         cv2.destroyAllWindows()
 
     def get_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
+        """Возвращает ОБРАБОТАННЫЙ кадр и сохраняет его в last_frame"""
+        if not self.cap or not self.cap.isOpened():
             return None
-        self.last_frame = frame
-        return frame
+        ret, frame = self.cap.read()
+        if not ret or frame is None or frame.size == 0:
+            return None
+        try:
+            processed = self.detector(frame)
+            self.last_frame = processed.copy()
+            return processed
+        except Exception as e:
+            print(f" Ошибка обработки: {e}")
+            self.last_frame = frame.copy()
+            return frame
 
     @staticmethod
     def encode_frame(frame, dsizex=640, dsizey=360, ext='.jpg'):
-        frame = cv2.resize(frame, (dsizex, dsizey))
-        ret, img = cv2.imencode(ext, frame)
-        return img
-
-    def frame_to_base64(self, frame):
-        return base64.b64encode(self.encode_frame(frame)).decode('utf-8')
+        if frame is None or frame.size == 0:
+            return b""
+        try:
+            resized = cv2.resize(frame, (dsizex, dsizey))
+            ret, buf = cv2.imencode(ext, resized, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            return buf.tobytes() if ret else b""
+        except Exception:
+            return b""
 
     def frame_to_bytes(self, frame):
-        return self.encode_frame(frame).tobytes()
+        return self.encode_frame(frame)
 
-    def frame_to_webformat(self, frame):
-        return (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + self.frame_to_bytes(frame) + b'\r\n\r\n')
-
-    def process_frame(self, frame):
-        return self.detector(frame)
-
-    def get_video_stream(self):
-        while True:
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-            yield self.get_frame()
-
-    def video_to_webformat(self):
-        for i in self.get_video_stream():
-            yield self.frame_to_webformat(self.process_frame(i))
-
-if __name__ == "__main__":
-    cam = Camera()
-
-    for i in cam.get_video_stream():
-        cv2.imshow("Camera: ", i)
-
-    
+    def frame_to_base64(self, frame):
+        if frame is None:
+            return ""
+        try:
+            return base64.b64encode(self.encode_frame(frame)).decode('utf-8')
+        except Exception:
+            return ""

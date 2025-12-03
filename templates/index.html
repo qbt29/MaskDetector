@@ -1,0 +1,377 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title> Mask Detection</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 15px;
+            background: #0f0f0f;
+            color: #e0e0e0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        h1 {
+            color: #4fc3f7;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #aaa;
+            margin-bottom: 25px;
+        }
+        .video-container {
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+        }
+        #video {
+            max-width: 100%;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: #000;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 16px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+            min-width: 100px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button.cam-btn {
+            background: #9c27b0;
+        }
+        button.cam-btn:hover {
+            background: #7b1fa2;
+        }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover {
+            background: #d32f2f;
+        }
+        button.toggle-logs {
+            background: #607d8b;
+        }
+        button.toggle-logs:hover {
+            background: #455a64;
+        }
+
+        .status {
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 6px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .status.show {
+            opacity: 1;
+        }
+        .success { background: #2e7d32; color: white; }
+        .error { background: #c62828; color: white; }
+        .info { background: #1565c0; color: white; }
+
+        .stats {
+            background: #212121;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        .stats h3 {
+            margin-top: 0;
+            color: #4fc3f7;
+        }
+        .cam-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .cam-item {
+            background: #333;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .cam-active {
+            background: #4CAF50;
+            font-weight: bold;
+        }
+
+        /* Logs panel */
+        #logsPanel {
+            display: none;
+            margin-top: 20px;
+            background: #121212;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #logsHeader {
+            padding: 10px 16px;
+            background: #263238;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        #logsContent {
+            height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .log-entry { margin: 2px 0; }
+        .log-info { color: #e0e0e0; }
+        .log-warn { color: #ff9800; }
+        .log-error { color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1> Mask Detection System</h1>
+        <p class="subtitle">MediaPipe + PyTorch | Real-time Inference</p>
+        
+        <div class="video-container">
+            <img id="video" alt="Live feed">
+            <div class="loading" id="loader"> Загрузка...</div>
+        </div>
+        
+        <div id="status" class="status"></div>
+        
+        <div class="controls">
+            <button class="cam-btn" onclick="switchCamera(0)"> Камера 0</button>
+            <button class="cam-btn" onclick="switchCamera(1)"> Камера 1</button>
+            <button class="cam-btn" onclick="switchCamera(2)"> Камера 2</button>
+            <button onclick="takeScreenshot()"> Скриншот</button>
+            <button class="danger" onclick="resetTracks()"> Сброс треков</button>
+            <button onclick="listCams()"> Скан камер</button>
+            <button class="toggle-logs" onclick="toggleLogs()"> 👁️ Логи</button>
+        </div>
+        
+        <div class="stats">
+            <h3> Системная информация</h3>
+            <div id="statsContent">
+                Загрузка статуса...
+            </div>
+            <div class="cam-list" id="camList"></div>
+        </div>
+
+        <!-- Logs panel -->
+        <div id="logsPanel">
+            <div id="logsHeader" onclick="toggleLogs()">
+                📜 Системные логи <span id="logsCount">(0)</span>
+            </div>
+            <div id="logsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const loader = document.getElementById('loader');
+        const statusDiv = document.getElementById('status');
+        const statsContent = document.getElementById('statsContent');
+        const camList = document.getElementById('camList');
+        const logsPanel = document.getElementById('logsPanel');
+        const logsContent = document.getElementById('logsContent');
+        const logsCount = document.getElementById('logsCount');
+
+        let logEntries = [];
+        const MAX_LOGS = 200;
+
+        // Перехватываем console.log/warn/error
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+
+        console.log = (...args) => {
+            originalLog(...args);
+            addLog(args.join(' '), 'info');
+        };
+        console.warn = (...args) => {
+            originalWarn(...args);
+            addLog(args.join(' '), 'warn');
+        };
+        console.error = (...args) => {
+            originalError(...args);
+            addLog(args.join(' '), 'error');
+        };
+
+        function addLog(message, level = 'info') {
+            const now = new Date().toLocaleTimeString();
+            const entry = `[${now}] ${message}`;
+            logEntries.push({ text: entry, level });
+            
+            // Ограничиваем размер
+            if (logEntries.length > MAX_LOGS) {
+                logEntries.shift();
+            }
+
+            // Обновляем отображение, только если панель открыта
+            if (logsPanel.style.display === 'block') {
+                renderLogs();
+            }
+            logsCount.textContent = `(${logEntries.length})`;
+        }
+
+        function renderLogs() {
+            logsContent.innerHTML = logEntries.map(item =>
+                `<div class="log-entry log-${item.level}">${item.text}</div>`
+            ).join('');
+            logsContent.scrollTop = logsContent.scrollHeight;
+        }
+
+        function toggleLogs() {
+            if (logsPanel.style.display === 'block') {
+                logsPanel.style.display = 'none';
+            } else {
+                logsPanel.style.display = 'block';
+                renderLogs();
+            }
+        }
+
+        // Автообновление кадра (10 FPS)
+        setInterval(() => {
+            video.src = `/api/current_frame?_t=${Date.now()}`;
+            loader.style.display = 'none';
+        }, 100);
+
+        function showMessage(text, type = 'info') {
+            statusDiv.textContent = text;
+            statusDiv.className = `status ${type} show`;
+            setTimeout(() => {
+                statusDiv.classList.remove('show');
+            }, 3000);
+            // Добавляем в логи
+            addLog(`UI: ${text}`, type === 'error' ? 'error' : 'info');
+        }
+
+        // ... остальные функции (switchCamera, takeScreenshot и т.д.) без изменений ...
+
+        async function switchCamera(id) {
+            try {
+                const res = await fetch('/api/switch_camera', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({camera_id: id})
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showMessage(`Камера ${id} активна`, 'success');
+                    listCams();
+                } else {
+                    showMessage(`${data.message}`, 'error');
+                }
+            } catch (e) {
+                showMessage('Ошибка переключения камеры', 'error');
+            }
+        }
+
+        async function takeScreenshot() {
+            try {
+                const res = await fetch('/api/current_frame64');
+                const data = await res.json();
+                if (data.image) {
+                    const link = document.createElement('a');
+                    link.href = data.image;
+                    link.download = `mask_screenshot_${Date.now()}.jpg`;
+                    link.click();
+                    showMessage('Скриншот сохранён', 'success');
+                } else {
+                    showMessage('Изображение недоступно', 'error');
+                }
+            } catch (e) {
+                showMessage('Ошибка скриншота', 'error');
+            }
+        }
+
+        async function resetTracks() {
+            try {
+                const res = await fetch('/api/reset_tracks', {method: 'POST'});
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showMessage('Треки сброшены', 'info');
+                }
+            } catch (e) {
+                showMessage('Не удалось сбросить треки', 'error');
+            }
+        }
+
+        async function listCams() {
+            try {
+                const res = await fetch('/api/list_cameras');
+                const data = await res.json();
+                
+                camList.innerHTML = '';
+                data.cameras.forEach(cam => {
+                    const el = document.createElement('div');
+                    el.className = 'cam-item';
+                    if (cam.id === currentCamera) {
+                        el.classList.add('cam-active');
+                    }
+                    el.textContent = `Камера ${cam.id} (${cam.width}×${cam.height})`;
+                    camList.appendChild(el);
+                });
+
+                const statusRes = await fetch('/api/status');
+                const statusData = await statusRes.json();
+                currentCamera = statusData.camera;
+                
+                statsContent.innerHTML = `
+                    <strong>API:</strong> Работает<br>
+                    <strong>Текущая камера:</strong> ${currentCamera ?? '—'}<br>
+                    <strong>Лиц в кадре:</strong> ${statusData.faces ?? '—'}
+                `;
+            } catch (e) {
+                statsContent.innerHTML = 'Не удалось получить статус';
+                addLog(`Ошибка получения статуса: ${e.message}`, 'error');
+            }
+        }
+
+        let currentCamera = null;
+
+        // Инициализация
+        window.addEventListener('load', () => {
+            addLog('Страница загружена', 'info');
+            listCams();
+        });
+    </script>
+</body>
+</html>
