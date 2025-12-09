@@ -3,7 +3,7 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from videoProcessor import FrameProcessor
 from cameraProcessor import CameraProcessor
-import enhanced_mask_detector as EMD
+# import enhanced_mask_detector as EMD
 import cv2
 import json
 import base64
@@ -14,7 +14,8 @@ router = fastapi.APIRouter()
 router.prefix='/api'
 
 FP = FrameProcessor()
-CP = CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector().detect)
+# CP = CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector().detect)
+CP = CameraProcessor(url=None, writer=None, reader=None, detector=None)
 
 global last_frames, last_frames64
 last_frames = {}
@@ -40,7 +41,10 @@ async def current_frame(cam_id: int):
 
 @router.get('/video_feed/{cam_id}')
 async def video_feed(cam_id: int):
-    return StreamingResponse(last_frame_streaming(cam_id), media_type="multipart/x-mixed-replace;boundary=frame")
+    global last_frames64
+    if cam_id in last_frames64.keys():
+        return StreamingResponse(last_frame_streaming(cam_id), media_type="multipart/x-mixed-replace;boundary=frame")
+    return None
 
 @router.post('/new_frame/{cam_id}')
 async def new_frame(request: Request, cam_id: int):
@@ -66,3 +70,8 @@ async def current_frame64(cam_id):
 async def get_detections(request: Request):
     r = await request.json()
     return {'offset': r.get('offset', 0)-1, 'limit': r.get('limit', 10)+1}
+
+@router.get('/list_cameras')
+async def list_cameras(request: Request):
+    global last_frames64
+    return {'id': list(last_frames64.keys())}

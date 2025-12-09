@@ -170,8 +170,7 @@
         <p class="subtitle">MediaPipe + PyTorch | Real-time Inference</p>
         
         <div class="video-container">
-            <img id="video" alt="Live feed">
-            <div class="loading" id="loader"> Загрузка...</div>
+            <img id="video" alt="Загрузка...">
         </div>
         
         <div id="status" class="status"></div>
@@ -205,7 +204,6 @@
 
     <script>
         const video = document.getElementById('video');
-        const loader = document.getElementById('loader');
         const statusDiv = document.getElementById('status');
         const statsContent = document.getElementById('statsContent');
         const camList = document.getElementById('camList');
@@ -215,6 +213,9 @@
 
         let logEntries = [];
         const MAX_LOGS = 200;
+
+        let activeCameraID = 0;
+        video.src = '/api/video_feed/1';
 
         // Перехватываем console.log/warn/error
         const originalLog = console.log;
@@ -267,12 +268,6 @@
             }
         }
 
-        // Автообновление кадра (10 FPS)
-        setInterval(() => {
-            video.src = `/api/current_frame?_t=${Date.now()}`;
-            loader.style.display = 'none';
-        }, 100);
-
         function showMessage(text, type = 'info') {
             statusDiv.textContent = text;
             statusDiv.className = `status ${type} show`;
@@ -286,22 +281,10 @@
         // ... остальные функции (switchCamera, takeScreenshot и т.д.) без изменений ...
 
         async function switchCamera(id) {
-            try {
-                const res = await fetch('/api/switch_camera', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({camera_id: id})
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    showMessage(`Камера ${id} активна`, 'success');
-                    listCams();
-                } else {
-                    showMessage(`${data.message}`, 'error');
-                }
-            } catch (e) {
-                showMessage('Ошибка переключения камеры', 'error');
-            }
+            activeCameraID = id;
+            video.src = `/api/video_feed/${activeCameraID.toString()}`;
+            console.log(`video source: ${video.src}, cameraID: ${activeCameraID}`);
+            showMessage(`Камера переключена на ${activeCameraID}`);
         }
 
         async function takeScreenshot() {
@@ -335,6 +318,7 @@
         }
 
         async function listCams() {
+            return;
             try {
                 const res = await fetch('/api/list_cameras');
                 const data = await res.json();

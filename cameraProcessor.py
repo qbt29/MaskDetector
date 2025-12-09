@@ -8,9 +8,9 @@ import time
 
 
 class CameraProcessor():
-    def __init__(self, url="http://127.0.0.1:8000/api/new_frame/1", filename=datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S.avi"), isWrite=False, isSend = False, reader = camera.Reader, writer = camera.Writer, detector=None):
-        self.video_src = videoProcessor.VideoProcessor(reader)
-        self.writer = writer(path=filename)
+    def __init__(self, url="http://127.0.0.1:8000/api/new_frame/2", filename=datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S.avi"), isWrite=False, isSend = False, reader = camera.Reader, writer = camera.Writer, detector=None):
+        self.video_src = videoProcessor.VideoProcessor(reader()) if reader is not None else None
+        self.writer = writer(path=filename) if writer is not None else None
         self.url = url
         self.detector = detector
         self.isSenderOnline = False
@@ -44,12 +44,15 @@ class CameraProcessor():
     def save_frame(self):
         last_sleep = 1
         while len(self.writerQueue) > 0:
-            if self.writer.write(self.senderQueue[0]):
-                self.senderQueue.pop(0)
-                last_sleep = 1
+            if self.writer is not None:
+                if self.writer.write(self.senderQueue[0]):
+                    self.senderQueue.pop(0)
+                    last_sleep = 1
+                else:
+                    time.sleep(last_sleep)
+                    last_sleep *= 2
             else:
-                time.sleep(last_sleep)
-                last_sleep *= 2
+                self.writerQueue = []
         self.isWriterOnline = False
 
     def video_process(self):
@@ -67,5 +70,5 @@ class CameraProcessor():
                 threading.Thread(target=self.send_new_frame, args=()).start()
 
 if __name__ == '__main__':
-    CP = CameraProcessor(isSend=True)
+    CP = CameraProcessor(isSend=True, writer=None)
     CP.video_process()

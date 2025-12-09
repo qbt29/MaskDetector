@@ -10,7 +10,7 @@ templates = Jinja2Templates(directory="templates")
 # cam = camera.Camera()
 @app.get("/")
 async def root(request: Request):
-    return templates.TemplateResponse("old_index.html", context={"request": request})
+    return templates.TemplateResponse("index.html", context={"request": request})
 
 @app.get("/next_page")
 async def next_page():
