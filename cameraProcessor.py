@@ -4,15 +4,15 @@ import requests
 import threading
 import datetime
 import time
-# import enhanced_mask_detector as EMD
+
 
 
 class CameraProcessor():
-    def __init__(self, url="http://127.0.0.1:8000/api/new_frame/1", filename=datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S.avi"), isWrite=False, isSend = False, reader = camera.Reader, writer = camera.Writer):
+    def __init__(self, url="http://127.0.0.1:8000/api/new_frame/1", filename=datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S.avi"), isWrite=False, isSend = False, reader = camera.Reader, writer = camera.Writer, detector=None):
         self.video_src = videoProcessor.VideoProcessor(reader)
         self.writer = writer(path=filename)
         self.url = url
-        # self.detector = EMD.main(self.video_src.cam)
+        self.detector = detector
         self.isSenderOnline = False
         self.isWriterOnline = False
         self.isWrite = isWrite
@@ -37,7 +37,8 @@ class CameraProcessor():
         self.isSenderOnline = False
 
     def process_frame(self, frame):
-        # return self.detector(frame)
+        if self.detector is not None:
+            return self.detector(frame)
         return frame
 
     def save_frame(self):

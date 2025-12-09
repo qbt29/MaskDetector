@@ -3,6 +3,7 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from videoProcessor import FrameProcessor
 from cameraProcessor import CameraProcessor
+import enhanced_mask_detector as EMD
 import cv2
 import json
 import base64
@@ -13,7 +14,7 @@ router = fastapi.APIRouter()
 router.prefix='/api'
 
 FP = FrameProcessor()
-CP = CameraProcessor(url=None, writer=None, reader=None)
+CP = CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector().detect)
 
 global last_frames, last_frames64
 last_frames = {}
