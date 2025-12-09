@@ -1,7 +1,8 @@
 import fastapi
 from fastapi import Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from videoProcessor import FrameProcessor
+from cameraProcessor import CameraProcessor
 import cv2
 import json
 import base64
@@ -12,19 +13,16 @@ router = fastapi.APIRouter()
 router.prefix='/api'
 
 FP = FrameProcessor()
+CP = CameraProcessor(url=None, writer=None, reader=None)
 
-global last_frame, last_frame64, changed
-last_frame = []
-last_frame64 = []
-changed = False
+global last_frames, last_frames64
+last_frames = {}
+last_frames64 = {}
 
-def last_frame_streaming():
-    global last_frame, last_frame64, changed
+def last_frame_streaming(cam_id):
+    global last_frames
     while True:
-        if changed:
-            changed = False
-            last_frame = FP.frame_to_webformat(readb64(last_frame64))
-        yield last_frame
+        yield last_frames.get(cam_id, b'')
         time.sleep(0.1)
 
 def readb64(uri):
@@ -34,35 +32,36 @@ def readb64(uri):
    return img
 
 
-@router.get('/current_frame')
-async def current_frame():
-    return Response(content=last_frame, media_type='image/jpeg')
+@router.get('/current_frame/{cam_id}')
+async def current_frame(cam_id: int):
+    global last_frames
+    return Response(content=last_frames.get(cam_id, b''), media_type='image/jpeg')
 
-@router.get('/video_feed')
-async def video_feed():
-    return StreamingResponse(last_frame_streaming(), media_type="multipart/x-mixed-replace;boundary=frame")
+@router.get('/video_feed/{cam_id}')
+async def video_feed(cam_id: int):
+    return StreamingResponse(last_frame_streaming(cam_id), media_type="multipart/x-mixed-replace;boundary=frame")
 
-@router.post('/new_frame')
-async def new_frame(request: Request):
-    global last_frame64, changed
-    prev = last_frame64
+@router.post('/new_frame/{cam_id}')
+async def new_frame(request: Request, cam_id: int):
+    global last_frames64, last_frames
+    prev = last_frames64.get(cam_id, "")
+    prev_frame = last_frames.get(cam_id, b"")
     try:
-        last_frame64 = (await request.json())['image']
-        changed = True
-        return {'status': True}
+        last_frames64[cam_id] = (await request.json())['image']
+        last_frames[cam_id] = FP.frame_to_webformat(CP.process_frame(readb64(last_frames64.get(cam_id, ""))))
+        return {'success': True}
     except Exception as e:
         print(e)
-        last_frame64 = prev
-        return {'status': False}
+        last_frames64[cam_id] = prev
+        last_frames[cam_id] = prev_frame
+        return {'success': False}
 
-@router.get('/current_frame64')
-async def current_frame64():
-    global last_frame64
-    return {"image": f"data:image/jpeg;base64,{last_frame64}"}
-
+@router.get('/current_frame64/{cam_id}')
+async def current_frame64(cam_id):
+    global last_frames64
+    return {"image": f"data:image/jpeg;base64,{last_frames64.get(cam_id, '')}"}
 
 @router.get('/get_detections')
 async def get_detections(request: Request):
     r = await request.json()
-    # print(offset, limit)
     return {'offset': r.get('offset', 0)-1, 'limit': r.get('limit', 10)+1}

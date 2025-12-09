@@ -12,15 +12,25 @@ class FrameProcessor:
         return frame
 
     def encode_frame(self, frame, dsizex=640, dsizey=360, ext='.jpg'):
+        if frame is None or frame.size == 0:
+            return []
         frame = self.resize_frame(frame, (dsizex, dsizey))
         ret, img = cv2.imencode(ext, frame)
-        return img
+        return img if ret else []
 
     def frame_to_base64(self, frame):
-        return base64.b64encode(self.encode_frame(frame)).decode('utf-8')
+        if frame is None:
+            return ''
+        try:
+            return base64.b64encode(self.encode_frame(frame)).decode('utf-8')
+        except:
+            return ''
 
     def frame_to_bytes(self, frame):
-        return self.encode_frame(frame).tobytes()
+        buf = self.encode_frame(frame)
+        if len(buf) == 0:
+            return b""
+        return buf.tobytes()
 
     def frame_to_webformat(self, frame):
         return (b'--frame\r\n'
