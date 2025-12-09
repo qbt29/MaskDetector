@@ -17,14 +17,15 @@ FP = FrameProcessor()
 # CP = CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector().detect)
 CP = CameraProcessor(url=None, writer=None, reader=None, detector=None)
 
-global last_frames, last_frames64
+global last_frames, last_frames64, cameras
+cameras = {}
 last_frames = {}
 last_frames64 = {}
 
 def last_frame_streaming(cam_id):
-    global last_frames
+    global cameras
     while True:
-        yield last_frames.get(cam_id, b'')
+        yield cameras.get(cam_id, {}).get('last_frame', b'')
         time.sleep(0.1)
 
 def readb64(uri):
@@ -36,35 +37,35 @@ def readb64(uri):
 
 @router.get('/current_frame/{cam_id}')
 async def current_frame(cam_id: int):
-    global last_frames
-    return Response(content=last_frames.get(cam_id, b''), media_type='image/jpeg')
+    global cameras
+    return Response(content=cameras.get(cam_id, {}).get('last_frame', b''), media_type='image/jpeg')
 
 @router.get('/video_feed/{cam_id}')
 async def video_feed(cam_id: int):
-    global last_frames64
-    if cam_id in last_frames64.keys():
+    global cameras
+    if cam_id in cameras.keys():
         return StreamingResponse(last_frame_streaming(cam_id), media_type="multipart/x-mixed-replace;boundary=frame")
     return None
 
 @router.post('/new_frame/{cam_id}')
 async def new_frame(request: Request, cam_id: int):
-    global last_frames64, last_frames
-    prev = last_frames64.get(cam_id, "")
-    prev_frame = last_frames.get(cam_id, b"")
+    global cameras
+    prev = cameras.get(cam_id, {}).get('last_frame64', "")
+    prev_frame = cameras.get(cam_id, {}).get('last_frame', "")
     try:
-        last_frames64[cam_id] = (await request.json())['image']
-        last_frames[cam_id] = FP.frame_to_webformat(CP.process_frame(readb64(last_frames64.get(cam_id, ""))))
+        cameras[cam_id]['last_frame64'] = (await request.json())['image']
+        cameras[cam_id]['last_frame'] = FP.frame_to_webformat(CP.process_frame(readb64(cameras.get(cam_id, {}).get('last_frame64', ''))))
         return {'success': True}
     except Exception as e:
         print(e)
-        last_frames64[cam_id] = prev
-        last_frames[cam_id] = prev_frame
+        cameras[cam_id]['last_frame64'] = prev
+        cameras[cam_id]['last_frame'] = prev_frame
         return {'success': False}
 
 @router.get('/current_frame64/{cam_id}')
 async def current_frame64(cam_id):
-    global last_frames64
-    return {"image": f"data:image/jpeg;base64,{last_frames64.get(cam_id, '')}"}
+    global cameras
+    return {"image": f"data:image/jpeg;base64,{cameras.get(cam_id, {}).get('last_frame64', '')}"}
 
 @router.get('/get_detections')
 async def get_detections(request: Request):
@@ -73,5 +74,6 @@ async def get_detections(request: Request):
 
 @router.get('/list_cameras')
 async def list_cameras(request: Request):
-    global last_frames64
-    return {'id': list(last_frames64.keys())}
+    global cameras
+    arr = [{'id': id, 'ts': cameras[id].get('ts', int(time.time()))} for id in cameras.keys()]
+    return {'cameras': arr}
