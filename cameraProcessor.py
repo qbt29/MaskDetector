@@ -57,9 +57,10 @@ class CameraProcessor():
 
     def video_process(self):
         for i in self.video_src.get_video_stream():
+            i = self.video_src.resize_frame(i, (640, 360))
             # i = self.process_frame(i)
             if self.isWrite:
-                self.writerQueue.append(self.video_src.resize_frame(i, (640, 360)))
+                self.writerQueue.append(i)
             if self.isSend:
                 self.senderQueue.append(i)
             if not self.isWriterOnline and self.isWrite:
@@ -70,5 +71,5 @@ class CameraProcessor():
                 threading.Thread(target=self.send_new_frame, args=()).start()
 
 if __name__ == '__main__':
-    CP = CameraProcessor(isSend=True, writer=None)
+    CP = CameraProcessor(isSend=True, writer=None, url="http://127.0.0.1:8000/api/new_frame/2")
     CP.video_process()

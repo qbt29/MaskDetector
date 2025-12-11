@@ -176,12 +176,10 @@
         <div id="status" class="status"></div>
         
         <div class="controls">
-            <button class="cam-btn" onclick="switchCamera(0)"> Камера 0</button>
-            <button class="cam-btn" onclick="switchCamera(1)"> Камера 1</button>
-            <button class="cam-btn" onclick="switchCamera(2)"> Камера 2</button>
+            <label for="camList"></label><select class="cam-list" id="camList" onclick="listCameras(3)" onchange="onSelectCamIDChange(event)"></select>
+            <button onclick="listCameras(3)"> Скан камер</button>
             <button onclick="takeScreenshot()"> Скриншот</button>
             <button class="danger" onclick="resetTracks()"> Сброс треков</button>
-            <button onclick="listCams()"> Скан камер</button>
             <button class="toggle-logs" onclick="toggleLogs()">  Логи</button>
         </div>
         
@@ -190,7 +188,7 @@
             <div id="statsContent">
                 Загрузка статуса...
             </div>
-            <div class="cam-list" id="camList"></div>
+<!--            <div class="cam-list" id="camList"></div>-->
         </div>
 
         <!-- Logs panel -->
@@ -215,7 +213,7 @@
         const MAX_LOGS = 200;
 
         let activeCameraID = 0;
-        video.src = '/api/video_feed/1';
+        video.src = `/api/video_feed/${activeCameraID}`;
 
         // Перехватываем console.log/warn/error
         const originalLog = console.log;
@@ -280,16 +278,37 @@
 
         // ... остальные функции (switchCamera, takeScreenshot и т.д.) без изменений ...
 
-        async function switchCamera(id) {
+        function switchCamera(id) {
             activeCameraID = id;
             video.src = `/api/video_feed/${activeCameraID.toString()}`;
             console.log(`video source: ${video.src}, cameraID: ${activeCameraID}`);
             showMessage(`Камера переключена на ${activeCameraID}`);
         }
 
+        async function listCameras(filter = 0) {
+            const listJSON = await fetch('/api/list_cameras');
+            const list = await listJSON.json();
+            camList.innerHTML = '<option class="cam-btn" value="-1" onClick="switchCamera(-1)">Выбор камеры:</option>';
+            list.cameras.forEach(cam => {
+                if (cam.isAlive > filter)
+                    return;
+                // <button className="cam-btn" onClick="switchCamera(0)"> Камера 0</button>
+                const el = document.createElement('option');
+                el.className = "cam-btn";
+                el.onClick = () => {switchCamera(cam.id)};
+                el.value = cam.id;
+                el.textContent = `Камера ${cam.id}`;
+                camList.appendChild(el);
+            })
+        }
+
+        async function onSelectCamIDChange (event) {
+            switchCamera(event.target.value);
+        }
+
         async function takeScreenshot() {
             try {
-                const res = await fetch('/api/current_frame64');
+                const res = await fetch(`/api/current_frame/${activeCameraID}`);
                 const data = await res.json();
                 if (data.image) {
                     const link = document.createElement('a');
@@ -302,6 +321,7 @@
                 }
             } catch (e) {
                 showMessage('Ошибка скриншота', 'error');
+                console.log(e);
             }
         }
 
@@ -317,44 +337,10 @@
             }
         }
 
-        async function listCams() {
-            return;
-            try {
-                const res = await fetch('/api/list_cameras');
-                const data = await res.json();
-                
-                camList.innerHTML = '';
-                data.cameras.forEach(cam => {
-                    const el = document.createElement('div');
-                    el.className = 'cam-item';
-                    if (cam.id === currentCamera) {
-                        el.classList.add('cam-active');
-                    }
-                    el.textContent = `Камера ${cam.id} (${cam.width}×${cam.height})`;
-                    camList.appendChild(el);
-                });
-
-                const statusRes = await fetch('/api/status');
-                const statusData = await statusRes.json();
-                currentCamera = statusData.camera;
-                
-                statsContent.innerHTML = `
-                    <strong>API:</strong> Работает<br>
-                    <strong>Текущая камера:</strong> ${currentCamera ?? '—'}<br>
-                    <strong>Лиц в кадре:</strong> ${statusData.faces ?? '—'}
-                `;
-            } catch (e) {
-                statsContent.innerHTML = 'Не удалось получить статус';
-                addLog(`Ошибка получения статуса: ${e.message}`, 'error');
-            }
-        }
-
-        let currentCamera = null;
-
         // Инициализация
         window.addEventListener('load', () => {
             addLog('Страница загружена', 'info');
-            listCams();
+            listCameras(0);
         });
     </script>
 </body>
