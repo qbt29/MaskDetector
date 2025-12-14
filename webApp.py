@@ -3,11 +3,26 @@ from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from api import router
 import uvicorn
-# import camera
+import os, time
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
-# cam = camera.Camera()
+
+async def clear_old_screenshots():
+    if 'screenshots' not in os.listdir():
+        return
+    for filename in os.listdir('screenshots'):
+        if filename.endswith('.jpg'):
+            if os.path.getctime(f'screenshots/{filename}') + 60 < time.time():
+                os.remove(f'screenshots/{filename}')
+
+
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    await clear_old_screenshots()
+    response = await call_next(request)
+    return response
+
 @app.get("/")
 async def root(request: Request):
     return templates.TemplateResponse("index.html", context={"request": request})

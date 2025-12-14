@@ -1,5 +1,3 @@
-from typing import Any
-
 import fastapi
 from fastapi import Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
@@ -7,11 +5,10 @@ from videoProcessor import FrameProcessor
 from cameraProcessor import CameraProcessor
 import enhanced_mask_detector as EMD
 import cv2
-import datetime
 import base64
 import numpy as np
 import time
-
+import os
 router = fastapi.APIRouter()
 router.prefix='/api'
 
@@ -38,7 +35,11 @@ def readb64(uri):
 @router.get('/current_frame/{cam_id}')
 async def current_frame(cam_id: int):
     global cameras
-    return Response(content=cameras.get(cam_id, {}).get('last_frame', b''), media_type='image/jpeg')
+    if 'screenshots' not in os.listdir():
+        os.mkdir('screenshots')
+    name = f'screenshots/mask_screenshot_{cam_id}_{int(time.time())}.jpg'
+    cv2.imwrite(name, readb64(cameras.get(cam_id, {}).get('last_frame64', '')))
+    return FileResponse(path=name, media_type='image/jpeg', filename=name)
 
 @router.get('/video_feed/{cam_id}')
 async def video_feed(cam_id: int):

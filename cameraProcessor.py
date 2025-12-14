@@ -6,7 +6,6 @@ import datetime
 import time
 
 
-
 class CameraProcessor():
     def __init__(self, url="http://127.0.0.1:8000/api/new_frame/2", filename=datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S.avi"), isWrite=False, isSend = False, reader = camera.Reader, writer = camera.Writer, detector=None):
         self.video_src = videoProcessor.VideoProcessor(reader()) if reader is not None else None

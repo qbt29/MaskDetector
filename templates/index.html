@@ -176,7 +176,9 @@
         <div id="status" class="status"></div>
         
         <div class="controls">
-            <label for="camList"></label><select class="cam-list" id="camList" onclick="listCameras(3)" onchange="onSelectCamIDChange(event)"></select>
+            <label for="camList"></label><select class="cam-list" id="camList" onclick="listCameras(3)" onchange="onSelectCamIDChange(event)">
+                <option class="cam-btn" value="-1">Выбор камеры:</option>
+            </select>
             <button onclick="listCameras(3)"> Скан камер</button>
             <button onclick="takeScreenshot()"> Скриншот</button>
             <button class="danger" onclick="resetTracks()"> Сброс треков</button>
@@ -212,7 +214,7 @@
         let logEntries = [];
         const MAX_LOGS = 200;
 
-        let activeCameraID = 0;
+        let activeCameraID = -1;
         video.src = `/api/video_feed/${activeCameraID}`;
 
         // Перехватываем console.log/warn/error
@@ -288,9 +290,19 @@
         async function listCameras(filter = 0) {
             const listJSON = await fetch('/api/list_cameras');
             const list = await listJSON.json();
-            camList.innerHTML = '<option class="cam-btn" value="-1" onClick="switchCamera(-1)">Выбор камеры:</option>';
+            if (list.cameras.length == 0) {
+                camList.innerHTML = '<option class="cam-btn" value="-1"">Выбор камеры:</option>';
+                return;
+            }
+            else {
+                if (activeCameraID < 0) {
+                    switchCamera(list.cameras[0].id);
+                }
+                camList.innerHTML = `<option class="cam-btn" value="${activeCameraID}">Камера ${activeCameraID}</option>`;
+
+            }
             list.cameras.forEach(cam => {
-                if (cam.isAlive > filter)
+                if (cam.isAlive > filter || cam.id == activeCameraID)
                     return;
                 // <button className="cam-btn" onClick="switchCamera(0)"> Камера 0</button>
                 const el = document.createElement('option');
@@ -308,17 +320,11 @@
 
         async function takeScreenshot() {
             try {
-                const res = await fetch(`/api/current_frame/${activeCameraID}`);
-                const data = await res.json();
-                if (data.image) {
-                    const link = document.createElement('a');
-                    link.href = data.image;
-                    link.download = `mask_screenshot_${Date.now()}.jpg`;
-                    link.click();
-                    showMessage('Скриншот сохранён', 'success');
-                } else {
-                    showMessage('Изображение недоступно', 'error');
-                }
+                const link = document.createElement('a');
+                link.href = `/api/current_frame/${activeCameraID}`;
+                link.download = `mask_screenshot_${activeCameraID}_${Date.now()}.jpg`;
+                link.click();
+                showMessage('Скриншот сохранён', 'success');
             } catch (e) {
                 showMessage('Ошибка скриншота', 'error');
                 console.log(e);
