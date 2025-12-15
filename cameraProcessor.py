@@ -11,7 +11,7 @@ class CameraProcessor():
         self.video_src = videoProcessor.VideoProcessor(reader()) if reader is not None else None
         self.writer = writer(path=filename) if writer is not None else None
         self.url = url
-        self.detector = detector
+        self.detector = detector() if detector is not None else None
         self.isSenderOnline = False
         self.isWriterOnline = False
         self.isWrite = isWrite
@@ -37,7 +37,7 @@ class CameraProcessor():
 
     def process_frame(self, frame):
         if self.detector is not None:
-            return self.detector(frame)
+            return self.detector.detect(frame)
         return frame
 
     def save_frame(self):
@@ -70,5 +70,5 @@ class CameraProcessor():
                 threading.Thread(target=self.send_new_frame, args=()).start()
 
 if __name__ == '__main__':
-    CP = CameraProcessor(isSend=True, writer=None, url="http://127.0.0.1:8000/api/new_frame/2")
+    CP = CameraProcessor(isSend=True, writer=None, url="http://127.0.0.1:8000/api/new_frame/10")
     CP.video_process()

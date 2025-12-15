@@ -3,7 +3,7 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from videoProcessor import FrameProcessor
 from cameraProcessor import CameraProcessor
-import enhanced_mask_detector as EMD
+# import enhanced_mask_detector as EMD
 import cv2
 import base64
 import numpy as np
@@ -13,8 +13,7 @@ router = fastapi.APIRouter()
 router.prefix='/api'
 
 FP = FrameProcessor()
-CP = CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector().detect)
-# CP = CameraProcessor(url=None, writer=None, reader=None, detector=None)
+CP = CameraProcessor(url=None, writer=None, reader=None, detector=None)
 
 global cameras
 cameras: dict = {}
@@ -54,10 +53,8 @@ async def new_frame(request: Request, cam_id: int):
     if cam_id < 0:
         return {'success': False, 'reason':'Camera ID is negative'}
     if cam_id not in cameras.keys():
-        # cameras[cam_id] = {'EMD': None}
-        # cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=None)}
-        cameras[cam_id] = {'EMD': EMD.MaskDetector()}
-        cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=cameras[cam_id]['EMD'].detector)}
+        cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=None)}
+        # cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector)}
     ip = request.client.host
     last_ip = cameras[cam_id].get('ip', 0)
     last_ts = cameras[cam_id].get('ts', 0)
@@ -92,12 +89,12 @@ async def reset_tracks(request: Request, cam_id: int):
     try:
         if cam_id == -1:
             for cam in cameras.keys():
-                if cameras[cam]['EMD'] is None:
+                if cameras[cam]['CP'].detector is None:
                     continue
-                cameras[cam]['EMD'].reset_trackers()
+                cameras[cam]['CP'].detector.reset_trackers()
         else:
-            if cameras[cam_id]['EMD'] is not None:
-                cameras[cam_id]['EMD'].reset_trackers()
+            if cameras[cam_id]['CP'].detector is not None:
+                cameras[cam_id]['CP'].detector.reset_trackers()
         return {'success': True}
     except:
         return {'success': False, 'reason': 'Internal Server Error'}

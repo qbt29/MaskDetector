@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from fastapi import Request
 from api import router
 import uvicorn
@@ -7,6 +8,7 @@ import os, time
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 async def clear_old_screenshots():
     if 'screenshots' not in os.listdir():

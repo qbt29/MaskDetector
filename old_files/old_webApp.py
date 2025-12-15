@@ -3,8 +3,8 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
-import old_camera
-import old_api
+import old_camera as camera
+import old_files.old_api as api
 
 # ─── ФИЛЬТР ДЛЯ ТИХИХ ЭНДПОИНТОВ ─────────────────────────────
 class QuietFilter(logging.Filter):
