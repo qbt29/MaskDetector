@@ -1,60 +1,41 @@
-# webApp.py
-import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
-import camera
-import api
+from fastapi.staticfiles import StaticFiles
+from fastapi import Request
+from api import router
+import uvicorn
+import os, time
 
-# ─── ФИЛЬТР ДЛЯ ТИХИХ ЭНДПОИНТОВ ─────────────────────────────
-class QuietFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return not any(endpoint in msg for endpoint in [
-            "/api/current_frame",
-            "/api/status",
-            "/favicon.ico"
-        ])
-
-logging.getLogger("uvicorn.access").addFilter(QuietFilter())
-# ───────────────────────────────────────────────────────────
-
+app = FastAPI()
 templates = Jinja2Templates(directory="templates")
-logger = logging.getLogger("app")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    cam = None
-    try:
-        logger.info("📷 Инициализация камеры...")
-        cam = camera.Camera()
-        api.cam = cam
-        logger.info("✅ Камера успешно инициализирована")
-        yield
-    except Exception as e:
-        logger.error(f"❌ ОШИБКА ИНИЦИАЛИЗАЦИИ КАМЕРЫ: {e}")
-        api.cam = None
-        yield
-    finally:
-        if cam:
-            logger.info("📷 Завершение работы камеры...")
-            cam.close()
-            logger.info("✅ Камера освобождена")
+async def clear_old_screenshots():
+    if 'screenshots' not in os.listdir():
+        return
+    for filename in os.listdir('screenshots'):
+        if filename.endswith('.jpg'):
+            if os.path.getctime(f'screenshots/{filename}') + 60 < time.time():
+                os.remove(f'screenshots/{filename}')
 
-app = FastAPI(lifespan=lifespan)
+
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    await clear_old_screenshots()
+    response = await call_next(request)
+    return response
 
 @app.get("/")
 async def root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", context={"request": request})
 
-app.include_router(api.router)
+@app.get("/next_page")
+async def next_page():
+    return "This is next page"
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "webApp:app",
-        host="127.0.0.1",
-        port=8000,
-        log_level="info",  # или "warning" для ещё более чистого вывода
-        reload=False
-    )
+# @app.get('/video_feed')
+# async def video_feed(request: Request):
+#     return StreamingResponse(cam.process_video(), media_type="multipart/x-mixed-replace;boundary=frame")
+
+app.include_router(router)
+uvicorn.run(app, host="0.0.0.0", port=8000)
