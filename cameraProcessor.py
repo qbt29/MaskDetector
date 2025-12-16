@@ -24,9 +24,9 @@ class CameraProcessor():
         last_sleep = 1
         while len(self.senderQueue) > 0:
             print("Current sender queue size: ", len(self.senderQueue))
-            frame = self.senderQueue[0]
+            frame, detections = self.senderQueue[0]
             try:
-                r = requests.post(url=self.url, json={"image": f"data:image/jpeg;base64,{self.video_src.frame_to_base64(frame=frame)}"})
+                r = requests.post(url=self.url, json={"image": f"data:image/jpeg;base64,{self.video_src.frame_to_base64(frame=frame)}", "detections": detections})
                 if r.status_code == 200 and r.json()["success"]:
                     self.senderQueue = self.senderQueue[1:]
                     last_sleep = 1
@@ -38,14 +38,14 @@ class CameraProcessor():
     def process_frame(self, frame):
         if self.detector is not None:
             return self.detector.detect(frame)
-        return frame
+        return frame, {'detections': {i : 0 for i in ['Mask OK', 'No Mask', 'Wrong Mask']}, 'quantity': 0}
 
     def save_frame(self):
         last_sleep = 1
         while len(self.writerQueue) > 0:
             if self.writer is not None:
-                if self.writer.write(self.senderQueue[0]):
-                    self.senderQueue.pop(0)
+                if self.writer.write(self.writerQueue[0]):
+                    self.writerQueue.pop(0)
                     last_sleep = 1
                 else:
                     time.sleep(last_sleep)
@@ -57,11 +57,11 @@ class CameraProcessor():
     def video_process(self):
         for i in self.video_src.get_video_stream():
             i = self.video_src.resize_frame(i, (640, 360))
-            # i = self.process_frame(i)
+            frame, detections = self.process_frame(i)
             if self.isWrite:
-                self.writerQueue.append(i)
+                self.writerQueue.append(frame)
             if self.isSend:
-                self.senderQueue.append(i)
+                self.senderQueue.append(frame)
             if not self.isWriterOnline and self.isWrite:
                 self.isWriterOnline = True
                 threading.Thread(target=self.save_frame, args=()).start()

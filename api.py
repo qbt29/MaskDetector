@@ -63,8 +63,10 @@ async def new_frame(request: Request, cam_id: int):
     if ip != last_ip and int(time.time()) - last_ts <= 600:
         return {'success': False, 'reason': 'This cameraID is already in use'}
     try:
-        cameras[cam_id]['last_frame64'] = (await request.json())['image']
+        json = (await request.json())
+        cameras[cam_id]['last_frame64'] = json['image']
         cameras[cam_id]['last_frame'] = FP.frame_to_webformat(CP.process_frame(readb64(cameras.get(cam_id, {}).get('last_frame64', ''))))
+        cameras[cam_id]['detects'] = json['detections']
         cameras[cam_id]['ip'] = ip
         cameras[cam_id]['ts'] = int(time.time())
         return {'success': True}
@@ -81,8 +83,9 @@ async def current_frame64(cam_id: int):
 
 @router.get('/get_detections/{cam_id}')
 async def get_detections(request: Request, cam_id: int):
-    r = await request.json()
-    return {'offset': r.get('offset', 0)-1, 'limit': r.get('limit', 10)+1}
+    if cam_id in cameras.keys():
+        return cameras[cam_id]['detections']
+    return None
 
 @router.get('/reset_tracks/{cam_id}')
 async def reset_tracks(request: Request, cam_id: int):
