@@ -3,7 +3,7 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from videoProcessor import FrameProcessor
 from cameraProcessor import CameraProcessor
-# import enhanced_mask_detector as EMD
+import enhanced_mask_detector as EMD
 import cv2
 import base64
 import numpy as np
@@ -53,8 +53,8 @@ async def new_frame(request: Request, cam_id: int):
     if cam_id < 0:
         return {'success': False, 'reason':'Camera ID is negative'}
     if cam_id not in cameras.keys():
-        cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=None)}
-        # cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector)}
+        # cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=None)}
+        cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector)}
     ip = request.client.host
     last_ip = cameras[cam_id].get('ip', 0)
     last_ts = cameras[cam_id].get('ts', 0)

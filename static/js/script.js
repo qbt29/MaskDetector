@@ -134,7 +134,7 @@ async function takeScreenshot() {
 
 async function resetTracks() {
     try {
-        const res = await fetch('/api/reset_tracks', {method: 'POST'});
+        const res = await fetch(`/api/reset_tracks/${activeCameraID}`, {method: 'POST'});
         const data = await res.json();
         if (data.status === 'success') {
             showMessage('Треки сброшены', 'info');

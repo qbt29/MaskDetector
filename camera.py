@@ -23,7 +23,7 @@ class Reader:
             #     cap = cv2.VideoCapture(i, backend)
                 cap = cv2.VideoCapture(i)
                 if cap.isOpened():
-                    print(f"Working camera offset: {i} (backend: {None})")
+                    print(f"Working camera offset: {i} (backend: {cap.getBackendName()})")
                     return cap
                 cap.release()
         return None
