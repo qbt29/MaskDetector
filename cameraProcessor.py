@@ -24,11 +24,11 @@ class CameraProcessor():
         last_sleep = 1
         while len(self.senderQueue) > 0:
             print("Current sender queue size: ", len(self.senderQueue))
-            frame, detections = self.senderQueue[0]
+            frame = self.senderQueue[0]
             try:
-                r = requests.post(url=self.url, json={"image": f"data:image/jpeg;base64,{self.video_src.frame_to_base64(frame=frame)}", "detections": detections})
+                r = requests.post(url=self.url, json={"image": f"data:image/jpeg;base64,{self.video_src.frame_to_base64(frame=frame)}"})
                 if r.status_code == 200 and r.json()["success"]:
-                    self.senderQueue = self.senderQueue[1:]
+                    self.senderQueue.pop(0)
                     last_sleep = 1
             except:
                 time.sleep(last_sleep)
@@ -37,8 +37,8 @@ class CameraProcessor():
 
     def process_frame(self, frame):
         if self.detector is not None:
-            return self.detector.detect(frame)
-        return frame, {'detections': {i : 0 for i in ['Mask OK', 'No Mask', 'Wrong Mask']}, 'quantity': 0}
+            return self.detector.detect(frame), self.detector.get_current_detections()
+        return frame, {'detections': {i : 0 for i in ['Mask OK', 'No Mask', 'Wrong Mask']}, 'quantity': -1}
 
     def save_frame(self):
         last_sleep = 1
@@ -57,11 +57,11 @@ class CameraProcessor():
     def video_process(self):
         for i in self.video_src.get_video_stream():
             i = self.video_src.resize_frame(i, (640, 360))
-            frame, detections = self.process_frame(i)
+            # frame, detections = self.process_frame(i)
             if self.isWrite:
-                self.writerQueue.append(frame)
+                self.writerQueue.append(i)
             if self.isSend:
-                self.senderQueue.append(frame)
+                self.senderQueue.append(i)
             if not self.isWriterOnline and self.isWrite:
                 self.isWriterOnline = True
                 threading.Thread(target=self.save_frame, args=()).start()

@@ -16,7 +16,9 @@ class FrameProcessor:
             return []
         frame = self.resize_frame(frame, (dsizex, dsizey))
         ret, img = cv2.imencode(ext, frame)
-        return img if ret else []
+        if not ret:
+            raise Exception('Error with encoding frame')
+        return img
 
     def frame_to_base64(self, frame):
         if frame is None:

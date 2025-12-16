@@ -56,25 +56,27 @@ async def new_frame(request: Request, cam_id: int):
         # cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=None)}
         cameras[cam_id] = {'CP':CameraProcessor(url=None, writer=None, reader=None, detector=EMD.MaskDetector)}
     ip = request.client.host
-    last_ip = cameras[cam_id].get('ip', 0)
+    last_ip = cameras[cam_id].get('ip', '0')
     last_ts = cameras[cam_id].get('ts', 0)
     prev = cameras[cam_id].get('last_frame64', "")
-    prev_frame = cameras[cam_id].get('last_frame', "")
+    prev_frame = cameras[cam_id].get('last_frame', b"")
     if ip != last_ip and int(time.time()) - last_ts <= 600:
         return {'success': False, 'reason': 'This cameraID is already in use'}
-    try:
-        json = (await request.json())
-        cameras[cam_id]['last_frame64'] = json['image']
-        cameras[cam_id]['last_frame'] = FP.frame_to_webformat(CP.process_frame(readb64(cameras.get(cam_id, {}).get('last_frame64', ''))))
-        cameras[cam_id]['detects'] = json['detections']
+    # try:
+    if True:
+        inpJson = (await request.json())
+        cameras[cam_id]['last_frame64'] = inpJson['image']
+        out = cameras[cam_id]['CP'].process_frame(readb64(cameras.get(cam_id, {}).get('last_frame64', '')))
+        cameras[cam_id]['last_frame'] = FP.frame_to_webformat(out[0])
+        cameras[cam_id]['detects'] = out[1]
         cameras[cam_id]['ip'] = ip
         cameras[cam_id]['ts'] = int(time.time())
         return {'success': True}
-    except Exception as e:
-        print(e)
-        cameras[cam_id]['last_frame64'] = prev
-        cameras[cam_id]['last_frame'] = prev_frame
-        return {'success': False, 'reason': 'Internal Server Error'}
+    # except Exception as e:
+    #     print('Error:', e)
+    #     cameras[cam_id]['last_frame64'] = prev
+    #     cameras[cam_id]['last_frame'] = prev_frame
+    #     return {'success': False, 'reason': 'Internal Server Error'}
 
 @router.get('/current_frame64/{cam_id}')
 async def current_frame64(cam_id: int):
@@ -84,7 +86,7 @@ async def current_frame64(cam_id: int):
 @router.get('/get_detections/{cam_id}')
 async def get_detections(request: Request, cam_id: int):
     if cam_id in cameras.keys():
-        return cameras[cam_id]['detections']
+        return cameras[cam_id]['detects']
     return None
 
 @router.get('/reset_tracks/{cam_id}')

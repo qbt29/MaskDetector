@@ -274,6 +274,7 @@ class MaskDetector:
         self.labels = ['Mask OK', 'No Mask', 'Wrong Mask']
         self.fps = 0
         self.prev_time = None
+        self.current_detections = {'detections': {i : 0 for i in self.labels+['Unknown']}, 'quantity': 0}
 
     def _load_model(self):
         model_files = [
@@ -333,15 +334,15 @@ class MaskDetector:
             confidences.append(conf)
 
         smoothed_tracks = self.bbox_smoother.update(detections, predictions, confidences)
-        preds = {'detections': {i : 0 for i in self.labels}, 'quantity': 0}
+        self.current_detections = {'detections': {i : 0 for i in self.labels+['Unknown']}, 'quantity': 0}
         for track in smoothed_tracks:
             x, y, w, h = track['bbox']
             pred = track['pred']
             conf = track['conf']
             color = track['color']
             label = f"{self.labels[pred] if pred < len(self.labels) else 'Unknown'} ({conf:.2f})"
-            preds['detections'][label] += 1
-            preds['quantity'] += 1
+            self.current_detections['detections'][f"{self.labels[pred] if pred < len(self.labels) else 'Unknown'}"] += 1
+            self.current_detections['quantity'] += 1
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(frame, (x, y - text_h - 8), (x + text_w, y), color, -1)
@@ -358,7 +359,10 @@ class MaskDetector:
         cv2.putText(frame, f"FPS: {self.fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, fps_color, 2)
         cv2.putText(frame, f"Faces: {len(smoothed_tracks)}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        return frame, preds
+        return frame
+    
+    def get_current_detections(self):
+        return self.current_detections
 
     def __call__(self, frame):
         return self.detect(frame.copy())
@@ -366,3 +370,4 @@ class MaskDetector:
     def reset_tracks(self):
         self.bbox_smoother.tracks.clear()
         self.bbox_smoother.next_id = 0
+        self.current_detections = {'detections': {i : 0 for i in self.labels}, 'quantity': 0}
