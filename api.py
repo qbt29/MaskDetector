@@ -62,21 +62,19 @@ async def new_frame(request: Request, cam_id: int):
     prev_frame = cameras[cam_id].get('last_frame', b"")
     if ip != last_ip and int(time.time()) - last_ts <= 600:
         return {'success': False, 'reason': 'This cameraID is already in use'}
-    # try:
-    if True:
-        inpJson = (await request.json())
-        cameras[cam_id]['last_frame64'] = inpJson['image']
+    try:
+        cameras[cam_id]['last_frame64'] = (await request.json())['image']
         out = cameras[cam_id]['CP'].process_frame(readb64(cameras.get(cam_id, {}).get('last_frame64', '')))
         cameras[cam_id]['last_frame'] = FP.frame_to_webformat(out[0])
         cameras[cam_id]['detects'] = out[1]
         cameras[cam_id]['ip'] = ip
         cameras[cam_id]['ts'] = int(time.time())
         return {'success': True}
-    # except Exception as e:
-    #     print('Error:', e)
-    #     cameras[cam_id]['last_frame64'] = prev
-    #     cameras[cam_id]['last_frame'] = prev_frame
-    #     return {'success': False, 'reason': 'Internal Server Error'}
+    except Exception as e:
+        print('Error:', e)
+        cameras[cam_id]['last_frame64'] = prev
+        cameras[cam_id]['last_frame'] = prev_frame
+        return {'success': False, 'reason': 'Internal Server Error'}
 
 @router.get('/current_frame64/{cam_id}')
 async def current_frame64(cam_id: int):
